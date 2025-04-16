@@ -1,0 +1,12 @@
+[submodule "SecLists"]
+	path = SecLists
+	url = https://github.com/danielmiessler/SecLists.git
+[submodule "john"]
+	path = john
+	url = https://github.com/openwall/john.git
+[submodule "btcrecover"]
+	path = btcrecover
+	url = https://github.com/3rdIteration/btcrecover.git
+[submodule "hashcat"]
+	path = hashcat
+	url = https://github.com/hashcat/hashcat.git
