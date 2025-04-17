@@ -13,13 +13,13 @@ This project provides a Makefile for installing and managing Bitcoin Core, as we
 
 - Automated installation and configuration of Bitcoin Core
 - Wallet creation, unlocking, and locking functionality
+- Wallet information and database file viewing functionality
 - Support for multiple password recovery methods:
   - Dictionary attack
   - Brute force attack
   - John the Ripper integration
   - Hashcat integration (GPU acceleration)
 - Checkpoint functionality for resuming interrupted attacks
-- Support for multiple rule sets to enhance password recovery
 
 ## Usage
 
@@ -47,9 +47,65 @@ make unlock NAME=mywallet PASS=mypassword
 # Lock wallet
 make lock NAME=mywallet
 
+# View wallet information and database files
+make examine-wallet-db NAME=mywallet
+
 # Stop Bitcoin Core daemon
 make stop
 ```
+
+### Creating and Encrypting Wallets
+
+Creating and encrypting Bitcoin Core wallets is an important step in securing your funds. Here's a detailed workflow:
+
+```bash
+# 1. Create a new wallet
+make create-wallet NAME=my_new_wallet
+
+# 2. Encrypt wallet (set password)
+make encrypt-wallet NAME=my_new_wallet PASS=my_secure_password
+
+# 3. Change wallet password (if needed)
+make change-passphrase NAME=my_new_wallet PASS=old_password NEW_PASS=new_password
+
+# 4. Temporarily unlock wallet (for transactions and other operations)
+make unlock NAME=my_new_wallet PASS=my_secure_password
+
+# 5. Lock wallet after operations
+make lock NAME=my_new_wallet
+```
+
+**Wallet Security Recommendations:**
+- Use strong passwords (at least 16 characters, including uppercase/lowercase letters, numbers, and special characters)
+- Don't use the same password in multiple places
+- Securely back up your password, consider using a password manager
+- Change your password periodically to enhance security
+- Always lock your wallet after completing operations
+
+**Warning:** If you forget your password, the only recovery method is using this cracking tool, which may require significant computational resources. Keep your passwords and wallet backups safe.
+
+### Creating BDB Format Wallets
+
+Newer versions of Bitcoin Core (v24 and above) create wallets in SQLite format by default, but this project's password recovery tool is primarily designed for traditional BDB format wallets. To create a BDB format wallet, use the dedicated command:
+
+```bash
+# Create BDB format wallet
+make create-bdb-wallet NAME=bdb_wallet
+
+# If the above command is not supported, first install the BDB-compatible Bitcoin Core version
+make install-bdb
+
+# Configure BDB wallet support
+make configure-bdb
+
+# Then create wallet
+make create-wallet NAME=bdb_wallet
+```
+
+**Note:**
+- In v24 and above, you may need to install v22.0 for full BDB wallet support
+- BDB format wallets are more compatible with the password recovery tool
+- Use `make examine-wallet-db NAME=wallet_name` to verify the wallet format is "bdb"
 
 ### Wallet Password Recovery
 
@@ -66,52 +122,52 @@ python3 wallet_cracker.py --bitcoin-core "mywallet" --john --john-path ./john --
 python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
 ```
 
+### Hashcat Checkpoint Functionality
+
+Hashcat mode supports checkpoint functionality, allowing you to interrupt and resume long-running attacks:
+
+```bash
+# Start Hashcat cracking
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+
+# Press Ctrl+C to interrupt at any time, progress will be automatically saved
+# ...
+
+# Resume cracking progress: just run the same command again
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+# The system will automatically detect the previous session and continue from the interruption point
+
+# If you need to restart instead of resuming, you can use the --no-resume parameter
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt --no-resume
+```
+
+All session information is saved in the `hashcat_sessions` directory, with a unique session file created for each attack. No need to manually manage checkpoints; the program will automatically handle the recovery process.
+
+### Examining Wallet Information and Database Files
+
+The new `examine-wallet-db` command allows you to view detailed wallet information and associated database files:
+
+```bash
+# Basic usage
+make examine-wallet-db NAME=mywallet
+
+# Specify wallet database path (if you know the exact path)
+make examine-wallet-db NAME=mywallet DB_PATH=/path/to/wallet.dat
+```
+
+This command will display:
+- Basic wallet information (name, version, format, balance, etc.)
+- Wallet format (BDB, descriptor, or SQLite)
+- Wallet encryption status (whether encrypted, whether locked)
+- Location and information of wallet-related files
+- Address information in the wallet
+
 ## Installation Requirements
 
 - Python 3.8 or 3.9 (recommended)
 - Bitcoin Core
 - Optional: John the Ripper (for password recovery)
 - Optional: Hashcat (for GPU-accelerated password recovery)
-- Dependencies listed in requirements.txt
-
-### Installation Steps
-
-1. **Create a Python virtual environment (recommended)**
-
-   ```bash
-   # Using standard Python
-   python3.9 -m venv btc_env
-   source btc_env/bin/activate
-   
-   # OR using conda
-   conda create -n btc_env python=3.9
-   conda activate btc_env
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-
-3. **Troubleshooting Protobuf Installation Issues**
-
-   If you encounter protobuf installation errors like:
-   
-   ```
-   ImportError: cannot import name 'build_py_2to3' from 'distutils.command.build_py'
-   ```
-   
-   This is because the tool requires an older version of protobuf (3.0.0a3) which is not compatible with Python 3.10+. Solutions:
-   
-   - Use Python 3.9 or 3.8 (recommended)
-   - For advanced users: Install dependencies individually with specific versions
-     ```bash
-     pip install protobuf==3.0.0a3
-     pip install two1==3.10.9 --no-deps
-     pip install pywallet
-     ```
 
 ### Optional Components Installation
 
@@ -148,53 +204,12 @@ curl -L -o rockyou.txt.gz https://github.com/brannondorsey/naive-hashcat/release
 gunzip rockyou.txt.gz
 ```
 
-### Resuming Hashcat Attacks
-
-The tool now supports checkpointing for Hashcat attacks. If an attack is interrupted:
-
-```bash
-# Resume from the last checkpoint
-python wallet_cracker.py --bitcoin-core wallet_name --hashcat -D dictionary_directory
-
-# Force restart (ignore checkpoint)
-python wallet_cracker.py --bitcoin-core wallet_name --hashcat -D dictionary_directory --no-resume
-```
-
-### Command Line Options
-
-```
-Arguments:
-  wallet_path            Path to wallet file or directory containing wallet files
-  
-Options:
-  -d, --dictionary       Single dictionary file path
-  -D, --dictionary-dir   Password dictionary directory (recursive search)
-  -b, --brute-force      Perform brute force attack
-  -c, --charset          Character set for brute force (default: abcdefghijklmnopqrstuvwxyz0123456789)
-  -m, --min-length       Minimum password length (default: 1)
-  -M, --max-length       Maximum password length (default: 8)
-  -w, --workers          Number of worker processes (default: 4)
-  --hashcat              Use hashcat for cracking (GPU acceleration)
-  --john                 Use John the Ripper for cracking
-  --john-path            John the Ripper installation path
-  --rule                 John the Ripper rule file path
-  --cpu-only             Use hashcat CPU mode (no GPU)
-  --list-wallet-types    List supported wallet types
-  --bitcoin-core         Use Bitcoin Core to test passwords directly (wallet name parameter)
-  --bitcoin-wordlist     Generate Bitcoin-related password dictionary
-  --base-dict            Base dictionary for Bitcoin dictionary generation
-  --test-hash            Specify hash file path to crack
-  -v, --verbose          Output detailed log information
-  -q, --quiet            Output only critical information
-  --extract-hash         Only extract hash, do not attempt to crack
-  --no-resume            Do not resume previous hashcat session, start fresh
-```
-
 ## Important Notes
 
 - This tool is intended only for legally recovering your own wallet passwords
 - For large password dictionaries, the recovery process may take a considerable amount of time
 - GPU acceleration (Hashcat mode) can significantly improve recovery speed
+- The checkpoint functionality makes the cracking process more convenient; even if interrupted, you can simply run the same command again to automatically continue without losing progress
 
 ## Security and Legal Disclaimer
 
