@@ -13,11 +13,13 @@
 
 - 自动化安装和配置 Bitcoin Core
 - 钱包创建、解锁和锁定功能
+- 钱包信息和数据库文件查看功能
 - 支持多种密码恢复方法：
   - 字典攻击
   - 暴力破解
   - John the Ripper 集成
   - Hashcat 集成（GPU 加速）
+- Hashcat 断点续传功能，可随时中断和恢复破解进度
 
 ## 使用方法
 
@@ -45,9 +47,65 @@ make unlock NAME=mywallet PASS=mypassword
 # 锁定钱包
 make lock NAME=mywallet
 
+# 查看钱包信息和数据库文件
+make examine-wallet-db NAME=mywallet
+
 # 停止 Bitcoin Core 守护进程
 make stop
 ```
+
+### 创建和加密钱包
+
+Bitcoin Core 钱包的创建和加密是保障资金安全的重要步骤。以下是详细的操作流程：
+
+```bash
+# 1. 创建新钱包
+make create-wallet NAME=my_new_wallet
+
+# 2. 加密钱包(设置密码)
+make encrypt-wallet NAME=my_new_wallet PASS=my_secure_password
+
+# 3. 更改钱包密码(如果需要)
+make change-passphrase NAME=my_new_wallet PASS=old_password NEW_PASS=new_password
+
+# 4. 临时解锁钱包(进行交易等操作)
+make unlock NAME=my_new_wallet PASS=my_secure_password
+
+# 5. 操作完成后锁定钱包
+make lock NAME=my_new_wallet
+```
+
+**钱包安全建议：**
+- 使用强密码 (至少16位，包含大小写字母、数字和特殊字符)
+- 不要在多处使用相同的密码
+- 安全备份密码，考虑使用密码管理器
+- 定期更改密码增强安全性
+- 完成操作后务必锁定钱包
+
+**警告：** 一旦忘记密码，唯一恢复方式是使用本工具破解，但可能需要大量计算资源。保管好您的密码和钱包备份。
+
+### 创建BDB格式钱包
+
+较新版本的Bitcoin Core（v24及以上）默认使用SQLite格式创建钱包，而本项目中的密码恢复工具主要针对传统的BDB格式钱包。要创建BDB格式的钱包，请使用专门的命令：
+
+```bash
+# 创建BDB格式钱包
+make create-bdb-wallet NAME=bdb_wallet
+
+# 如果上述命令不支持，请先安装支持BDB的Bitcoin Core版本
+make install-bdb
+
+# 配置BDB钱包支持
+make configure-bdb
+
+# 然后创建钱包
+make create-wallet NAME=bdb_wallet
+```
+
+**注意：** 
+- 在v24及以上版本中，可能需要安装v22.0版本以获得完整的BDB钱包支持
+- BDB格式钱包与密码恢复工具更加兼容
+- 请使用`make examine-wallet-db NAME=钱包名称`命令验证钱包格式为"bdb"
 
 ### 钱包密码恢复
 
@@ -63,6 +121,46 @@ python3 wallet_cracker.py --bitcoin-core "mywallet" --john --john-path ./john --
 # 使用 Hashcat 加速
 python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
 ```
+
+### Hashcat 断点续传功能
+
+Hashcat 模式支持断点续传功能，可以在长时间破解过程中随时中断并在稍后恢复：
+
+```bash
+# 开始 Hashcat 破解
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+
+# 按 Ctrl+C 随时中断，进度会自动保存
+# ...
+
+# 自动恢复破解进度：只需再次运行完全相同的命令
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+# 系统会自动检测到之前的会话并从中断处继续
+
+# 如果需要重新开始而不是恢复，可以使用 --no-resume 参数
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt --no-resume
+```
+
+所有会话信息都保存在 `hashcat_sessions` 目录中，每个攻击会创建唯一的会话文件。无需手动管理断点，程序会自动处理恢复过程。
+
+### 查看钱包信息和数据库文件
+
+新增的`examine-wallet-db`命令可以查看钱包的详细信息和关联的数据库文件：
+
+```bash
+# 基本用法
+make examine-wallet-db NAME=mywallet
+
+# 指定钱包数据库路径(如果知道确切路径)
+make examine-wallet-db NAME=mywallet DB_PATH=/path/to/wallet.dat
+```
+
+此命令会显示：
+- 钱包基本信息（名称、版本、格式、余额等）
+- 钱包格式（BDB、描述符或SQLite）
+- 钱包加密状态（是否加密、是否锁定）
+- 钱包相关文件的位置和信息
+- 钱包中的地址信息
 
 ## 安装要求
 
@@ -111,3 +209,4 @@ gunzip rockyou.txt.gz
 - 该工具仅用于合法恢复自己的钱包密码
 - 对于大型密码字典，恢复过程可能需要较长时间
 - GPU 加速（Hashcat 模式）可以显著提高恢复速度
+- 断点续传功能让破解过程更加便捷，即使运行中断，只需重新运行相同命令即可自动继续，避免丢失进度
