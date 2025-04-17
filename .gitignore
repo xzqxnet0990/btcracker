@@ -14,5 +14,5 @@ rockyou.txt
 wallet/*
 john/*
 hashcat/*
-btcrecover/*
 SecLists/*
+btcrecover/*

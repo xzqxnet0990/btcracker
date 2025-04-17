@@ -36,3 +36,5 @@ flake8>=7.1.2
 # 其他依赖
 six>=1.17.0
 python-dateutil>=2.9.0
+protobuf==3.0.0a3
+two1==3.10.9

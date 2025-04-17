@@ -1,5 +1,12 @@
 # Bitcoin Core 安装与钱包密码恢复工具
 
+<h4 align="center">
+<p>
+<a href="https://github.com/xzqxnet0990/btcracker/tree/main/README.md">简体中文</a> |
+<a href="https://github.com/xzqxnet0990/btcracker/tree/main/README_EN.md">English</a> 
+</p>
+</h4>
+
 这个项目提供了用于安装和管理 Bitcoin Core 的 Makefile，以及一个强大的钱包密码恢复工具 `wallet_cracker.py`。
 
 ## 功能特点
@@ -59,7 +66,7 @@ python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rocky
 
 ## 安装要求
 
-- Python 3.6+
+- Python 3.9
 - Bitcoin Core
 - 可选：John the Ripper（密码恢复）
 - 可选：Hashcat（GPU 加速密码恢复）
