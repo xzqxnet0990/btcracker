@@ -1,4 +1,4 @@
-# Bitcoin Wallet Cracker
+# Bitcoin Core Installation and Wallet Password Recovery Tool
 
 <h4 align="center">
 <p>
@@ -7,23 +7,71 @@
 </p>
 </h4>
 
-A tool for recovering lost Bitcoin wallet passwords through various methods. **For educational purposes only.**
+This project provides a Makefile for installing and managing Bitcoin Core, as well as a powerful wallet password recovery tool `wallet_cracker.py`.
 
 ## Features
 
-- Supports multiple wallet types including Bitcoin Core wallets
-- Dictionary attack with multiple wordlists
-- Brute force attack with customizable character sets
-- GPU acceleration via Hashcat
-- CPU-only mode for systems without dedicated GPU
+- Automated installation and configuration of Bitcoin Core
+- Wallet creation, unlocking, and locking functionality
+- Support for multiple password recovery methods:
+  - Dictionary attack
+  - Brute force attack
+  - John the Ripper integration
+  - Hashcat integration (GPU acceleration)
 - Checkpoint functionality for resuming interrupted attacks
 - Support for multiple rule sets to enhance password recovery
 
-## Installation
+## Usage
 
-### Requirements
+### Bitcoin Core Installation and Management
+
+```bash
+# Install Bitcoin Core
+make install
+
+# Configure Bitcoin Core
+make configure
+
+# Start Bitcoin Core daemon
+make start
+
+# Check Bitcoin Core status
+make status
+
+# Create new wallet
+make create-wallet NAME=mywallet
+
+# Unlock wallet (set password)
+make unlock NAME=mywallet PASS=mypassword
+
+# Lock wallet
+make lock NAME=mywallet
+
+# Stop Bitcoin Core daemon
+make stop
+```
+
+### Wallet Password Recovery
+
+Use the `wallet_cracker.py` tool to recover forgotten wallet passwords:
+
+```bash
+# Using the Makefile integrated test target
+make test NAME=mywallet
+
+# Directly using wallet_cracker.py
+python3 wallet_cracker.py --bitcoin-core "mywallet" --john --john-path ./john --dictionary rockyou.txt
+
+# Using Hashcat acceleration
+python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+```
+
+## Installation Requirements
 
 - Python 3.8 or 3.9 (recommended)
+- Bitcoin Core
+- Optional: John the Ripper (for password recovery)
+- Optional: Hashcat (for GPU-accelerated password recovery)
 - Dependencies listed in requirements.txt
 
 ### Installation Steps
@@ -65,25 +113,39 @@ A tool for recovering lost Bitcoin wallet passwords through various methods. **F
      pip install pywallet
      ```
 
-## Usage
+### Optional Components Installation
 
-### Basic Usage
+#### John the Ripper
 
 ```bash
-# Dictionary attack on a wallet file
-python wallet_cracker.py wallet.dat -D dictionary_directory
+# Clone repository
+git clone https://github.com/openwall/john.git
 
-# Bitcoin Core mode
-python wallet_cracker.py --bitcoin-core wallet_name -D dictionary_directory
+# Compile (Unix/Linux/MacOS)
+cd john/src
+./configure && make
+```
 
-# Using Hashcat acceleration
-python wallet_cracker.py --bitcoin-core wallet_name --hashcat -D dictionary_directory
+#### Hashcat
 
-# Brute force attack
-python wallet_cracker.py wallet.dat -b -m 4 -M 8
+```bash
+# Download from official website: https://hashcat.net/hashcat/
+# Or install using package manager
+# macOS:
+brew install hashcat
 
-# List supported wallet types
-python wallet_cracker.py --list-wallet-types
+# Ubuntu/Debian:
+sudo apt-get install hashcat
+```
+
+## Password Dictionaries
+
+The tool defaults to using the `rockyou.txt` dictionary file, which is a commonly used password dictionary. You can download it:
+
+```bash
+# Download rockyou.txt
+curl -L -o rockyou.txt.gz https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt.gz
+gunzip rockyou.txt.gz
 ```
 
 ### Resuming Hashcat Attacks
@@ -128,13 +190,11 @@ Options:
   --no-resume            Do not resume previous hashcat session, start fresh
 ```
 
-## Simplified Usage with Makefile
+## Important Notes
 
-A Makefile is included for easier use:
-
-```bash
-make test NAME=wallet_name
-```
+- This tool is intended only for legally recovering your own wallet passwords
+- For large password dictionaries, the recovery process may take a considerable amount of time
+- GPU acceleration (Hashcat mode) can significantly improve recovery speed
 
 ## Security and Legal Disclaimer
 
