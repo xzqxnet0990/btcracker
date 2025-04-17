@@ -12,7 +12,3 @@ found_password.txt
 *.log
 rockyou.txt
 wallet/*
-john/*
-hashcat/*
-SecLists/*
-btcrecover/*
