@@ -122,6 +122,59 @@ python3 wallet_cracker.py --bitcoin-core "mywallet" --john --john-path ./john --
 python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
 ```
 
+### Using the btcracker_run.py Launcher
+
+For simplified operation, the project provides a `btcracker_run.py` launcher script that can be used directly without installing btcracker:
+
+```bash
+# Using the launcher script to crack a Bitcoin Core wallet
+python btcracker_run.py --bitcoin-core "mywallet" --dictionary rockyou.txt
+
+# Using the launcher with Hashcat acceleration
+python btcracker_run.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+
+# Using the launcher for brute force attack
+python btcracker_run.py --bitcoin-core "mywallet" --brute-force -m 4 -M 8
+```
+
+The `btcracker_run.py` launcher supports all the same command-line parameters as wallet_cracker.py. This method requires no installation, just direct execution, making it more suitable for temporary use or testing scenarios.
+
+### Blockchain Synchronization Issues
+
+When setting up Bitcoin Core for the first time, your node needs to download and verify the entire blockchain. During this process, you might encounter the following error messages:
+
+```
+(standard_in) 1: syntax error
+Progress: synced X/Y blocks (%)
+(standard_in) 1: syntax error
+/bin/sh: 7: [: Illegal number: 
+Synchronization nearly complete (%)
+```
+
+**Explanation of these errors:**
+- These are just errors in the progress display script and do not affect the actual blockchain synchronization process
+- `syntax error` usually occurs due to issues with the `bc` command when calculating percentages in scripts
+- `Illegal number` error happens when parsing non-numeric content
+
+**Solutions:**
+1. Continue letting the blockchain synchronization complete; these errors won't affect the sync process
+2. Use the following command to view the real synchronization status:
+   ```bash
+   bitcoin-cli getblockchaininfo | grep -E "blocks|headers|verificationprogress"
+   ```
+3. Complete synchronization can take several days to weeks depending on your network and hardware performance
+
+**Tips for optimizing sync speed:**
+- Use a high-speed internet connection
+- Ensure you have sufficient disk space (at least 500GB)
+- Consider adding more connections in bitcoin.conf:
+  ```
+  maxconnections=16
+  dbcache=4096  # If you have enough RAM
+  ```
+
+Note that some wallet functionality may not work properly until blockchain synchronization is complete. Cracking encrypted wallets doesn't require a complete blockchain, but interacting with the wallet may be limited.
+
 ### Hashcat Checkpoint Functionality
 
 Hashcat mode supports checkpoint functionality, allowing you to interrupt and resume long-running attacks:

@@ -122,6 +122,59 @@ python3 wallet_cracker.py --bitcoin-core "mywallet" --john --john-path ./john --
 python3 wallet_cracker.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
 ```
 
+### 使用 btcracker_run.py 启动器
+
+为了简化操作，项目提供了 `btcracker_run.py` 启动脚本，可以在不安装 btcracker 的情况下直接使用：
+
+```bash
+# 使用启动脚本破解 Bitcoin Core 钱包
+python btcracker_run.py --bitcoin-core "mywallet" --dictionary rockyou.txt
+
+# 使用启动脚本搭配 Hashcat 加速
+python btcracker_run.py --bitcoin-core "mywallet" --hashcat --dictionary rockyou.txt
+
+# 使用启动脚本进行暴力破解
+python btcracker_run.py --bitcoin-core "mywallet" --brute-force -m 4 -M 8
+```
+
+`btcracker_run.py` 启动器支持与 wallet_cracker.py 完全相同的命令行参数，这种方式无需安装，只需直接运行即可，更适合临时使用或测试场景。
+
+### 区块链同步问题处理
+
+当您首次设置Bitcoin Core时，节点需要下载并验证整个区块链。在这个过程中，您可能会遇到以下错误信息：
+
+```
+(standard_in) 1: syntax error
+进度: 已同步 X/Y 个区块 (%)
+(standard_in) 1: syntax error
+/bin/sh: 7: [: Illegal number: 
+同步已基本完成 (%)
+```
+
+**这些错误解释：**
+- 这些只是进度显示脚本的错误，不影响区块链实际的同步过程
+- `syntax error` 通常是由于脚本中使用 `bc` 命令计算百分比时出现问题
+- `Illegal number` 错误发生在解析非数字内容时
+
+**解决方案：**
+1. 继续让区块链同步完成，这些错误不会影响同步过程
+2. 使用以下命令查看真实的同步状态：
+   ```bash
+   bitcoin-cli getblockchaininfo | grep -E "blocks|headers|verificationprogress"
+   ```
+3. 完整的同步过程可能需要几天到几周时间，取决于您的网络和硬件性能
+
+**优化同步速度的建议：**
+- 使用高速互联网连接
+- 确保有足够的磁盘空间（至少需要500GB）
+- 考虑在bitcoin.conf中添加更多连接：
+  ```
+  maxconnections=16
+  dbcache=4096  # 如果您有足够的RAM
+  ```
+
+请注意，在完成区块链同步之前，某些钱包功能可能无法正常工作。破解加密钱包不需要完整的区块链，但与钱包交互的功能可能会受到限制。
+
 ### Hashcat 断点续传功能
 
 Hashcat 模式支持断点续传功能，可以在长时间破解过程中随时中断并在稍后恢复：

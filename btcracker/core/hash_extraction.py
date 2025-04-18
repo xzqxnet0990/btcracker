@@ -460,11 +460,13 @@ def get_bitcoin_core_wallet_path(wallet_name):
 
 def bitcoin_core_extract_hash_with_bitcoin2john(wallet_name):
     """使用bitcoin2john.py提取Bitcoin钱包哈希"""
-    # 构建钱包路径
-    wallet_path = os.path.expanduser(f"~/Library/Application Support/Bitcoin/wallets/{wallet_name}/wallet.dat")
-    if not os.path.exists(wallet_path):
-        log(f"警告: 找不到钱包文件 {wallet_path}", level=2)
+    # 使用通用函数获取钱包路径，适配多种操作系统
+    wallet_path = get_bitcoin_core_wallet_path(wallet_name)
+    if not wallet_path:
+        log(f"警告: 找不到钱包文件 {wallet_name}", level=2)
         return None, None
+    
+    log(f"找到钱包文件路径: {wallet_path}", level=2)
     
     # 尝试直接导入bitcoin2john模块
     module_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "btcracker", "core", "bitcoin2john.py")
