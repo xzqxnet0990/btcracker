@@ -13,3 +13,4 @@ found_password.txt
 rockyou.txt
 wallet/*
 ~/*
+hashcat_sessions/*
