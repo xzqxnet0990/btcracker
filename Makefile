@@ -236,8 +236,9 @@ configure:
 		echo "rpcuser=$(RPC_USER)" >> $(CONF_FILE); \
 		echo "rpcpassword=$(RPC_PASSWORD)" >> $(CONF_FILE); \
 		echo "rpcport=$(RPC_PORT)" >> $(CONF_FILE); \
-		echo "prune=2000" >> $(CONF_FILE); \
-		echo "txindex=1" >> $(CONF_FILE); \
+		echo "# 启用以下两个选项中的一个，但不能同时启用" >> $(CONF_FILE); \
+		echo "# prune=2000  # 启用剪枝模式，节省磁盘空间" >> $(CONF_FILE); \
+		echo "txindex=1    # 启用交易索引，需要更多磁盘空间但功能更完整" >> $(CONF_FILE); \
 		echo "walletdir=$(DATADIR)/wallets" >> $(CONF_FILE); \
 		echo "keypool=1000" >> $(CONF_FILE); \
 		echo "fallbackfee=0.0002" >> $(CONF_FILE); \
@@ -257,8 +258,9 @@ configure-bdb:
 		echo "rpcuser=$(RPC_USER)" >> $(CONF_FILE); \
 		echo "rpcpassword=$(RPC_PASSWORD)" >> $(CONF_FILE); \
 		echo "rpcport=$(RPC_PORT)" >> $(CONF_FILE); \
-		echo "prune=2000" >> $(CONF_FILE); \
-		echo "txindex=1" >> $(CONF_FILE); \
+		echo "# 启用以下两个选项中的一个，但不能同时启用" >> $(CONF_FILE); \
+		echo "# prune=2000  # 启用剪枝模式，节省磁盘空间" >> $(CONF_FILE); \
+		echo "txindex=1    # 启用交易索引，需要更多磁盘空间但功能更完整" >> $(CONF_FILE); \
 		echo "walletdir=$(DATADIR)/wallets" >> $(CONF_FILE); \
 		echo "keypool=1000" >> $(CONF_FILE); \
 		echo "fallbackfee=0.0002" >> $(CONF_FILE); \
@@ -647,7 +649,7 @@ reindex:
 		exit 1; \
 	else \
 		echo "启动Bitcoin Core并重建索引 (这可能需要几个小时到几天时间)..."; \
-		$(BITCOIND) -daemon -reindex -prune=2000; \
+		$(BITCOIND) -daemon -reindex; \
 		echo "等待启动..."; \
 		sleep 5; \
 		echo "重建索引已在后台开始，您可以使用以下命令检查进度:"; \
