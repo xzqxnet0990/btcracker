@@ -344,6 +344,8 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                     print(f"执行hashcat字典攻击时出错: {e}")
             
             # 检查是否找到密码
+            valid_password = None
+            
             if found_password:
                 # 验证密码
                 if "bitcoin" in hash_file:
@@ -352,18 +354,22 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                         success, _ = test_bitcoin_core_password(wallet_name, found_password)
                         if success:
                             print("密码验证成功！")
-                            return found_password
+                            valid_password = found_password
+                            return valid_password
                         else:
                             print("警告: 密码无法通过Bitcoin Core验证，可能是误报")
-                            found_password = None  # 重置找到的密码，尝试其他方法
+                            # 不立即返回，继续尝试其他方法
                     except Exception as e:
                         print(f"验证密码时出错: {e}")
+                        # 出错时也不要立即返回
                 else:
-                    return found_password
+                    # 非Bitcoin钱包情况，直接返回找到的密码
+                    valid_password = found_password
+                    return valid_password
                     
-            # 如果hashcat没有找到密码，尝试内置字典攻击方法
-            if not found_password and passwords and "bitcoin" in hash_file:
-                print("hashcat未找到密码，尝试使用内置字典攻击方法...")
+            # 如果hashcat没有找到有效密码，尝试内置字典攻击方法
+            if not valid_password and passwords and "bitcoin" in hash_file:
+                print("hashcat未找到有效密码，尝试使用内置字典攻击方法...")
                 wallet_name = None
                 
                 # 尝试从哈希文件路径提取钱包名称
@@ -388,6 +394,15 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                     if password:
                         print(f"\n成功! 内置字典攻击找到密码: {password}")
                         return password
+            
+            # 如果找到了密码但验证失败，且没有找到更好的密码，返回最初找到的密码
+            # 这样调用者可以决定如何处理可能的误报
+            if found_password and not valid_password:
+                print(f"警告: 返回可能的密码: {found_password}，但Bitcoin Core验证失败")
+                return found_password
+            
+            # 如果没有找到任何密码（甚至可能的误报），返回None
+            return None
         
         # 规则攻击模式
         elif attack_mode == 1:
