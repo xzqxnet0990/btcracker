@@ -8,6 +8,8 @@
 # 3. 使用Hashcat加速:   python -m btcracker.cli --bitcoin-core 钱包名 --hashcat -D 字典目录
 # 4. 暴力破解:          python -m btcracker.cli wallet.dat -b -m 4 -M 8
 # 5. 列出支持的钱包类型: python -m btcracker.cli --list-wallet-types
+# 6. 仅提取哈希:        python -m btcracker.cli wallet.dat --extract-hash
+# 7. 使用bitcoin2john:  python -m btcracker.cli wallet.dat --extract-hash --bitcoin2john
 
 import os
 import sys
@@ -16,8 +18,8 @@ import tempfile
 from btcracker.utils.logging import log, set_log_level
 from btcracker.utils.file_handling import collect_password_files
 from btcracker.core.wallet import collect_wallet_files, test_password, detect_wallet_type
-from btcracker.core.hash_extraction import extract_hash_from_wallet, bitcoin_core_extract_hash
 from btcracker.core.processor import process_wallet, process_bitcoin_core_wallet
+from btcracker.core.processor import extract_hash_from_wallet, bitcoin_core_extract_hash_with_bitcoin2john, bitcoin_core_extract_hash
 
 def parse_args_custom(parser):
     """Custom argument parser with additional validation and error handling"""
@@ -64,6 +66,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="输出详细日志信息")
     parser.add_argument("-q", "--quiet", action="store_true", help="仅输出关键信息")
     parser.add_argument("--extract-hash", action="store_true", help="仅提取哈希，不尝试破解")
+    parser.add_argument("--bitcoin2john", action="store_true", help="使用内置的bitcoin2john提取哈希")
     parser.add_argument("--no-resume", action="store_true", help="不恢复之前的hashcat会话，重新开始")
 
     args = parse_args_custom(parser)
@@ -99,25 +102,47 @@ def main():
     # 如果指定了--extract-hash，仅提取哈希并退出
     if args.extract_hash:
         if args.bitcoin_core:
-            hash_format, hash_file = bitcoin_core_extract_hash(args.bitcoin_core)
-            if hash_format and hash_file:
-                print(f"已提取哈希并保存到: {hash_file}")
-                print(f"哈希格式: {hash_format}")
+            # 使用bitcoin2john方法
+            if args.bitcoin2john:
+                hash_format, hash_file = bitcoin_core_extract_hash_with_bitcoin2john(args.bitcoin_core)
+                if hash_format and hash_file:
+                    print(f"已使用bitcoin2john提取哈希并保存到: {hash_file}")
+                    print(f"哈希格式: {hash_format}")
+                else:
+                    print("使用bitcoin2john提取哈希失败")
             else:
-                print("提取哈希失败")
+                # 使用原始方法
+                hash_format, hash_file = bitcoin_core_extract_hash(args.bitcoin_core)
+                if hash_format and hash_file:
+                    print(f"已提取哈希并保存到: {hash_file}")
+                    print(f"哈希格式: {hash_format}")
+                else:
+                    print("提取哈希失败")
         elif args.wallet_path:
             if os.path.isdir(args.wallet_path):
                 wallet_files = collect_wallet_files(args.wallet_path)
                 for wallet_file in wallet_files:
                     print(f"处理钱包文件: {wallet_file}")
-                    hash_data, hash_file = extract_hash_from_wallet(wallet_file)
+                    # 根据参数选择提取方法
+                    if args.bitcoin2john:
+                        hash_data, hash_file = extract_hash_from_wallet(wallet_file)
+                    else:
+                        # 这里可以调用其他的hash提取方法
+                        hash_data, hash_file = extract_hash_from_wallet(wallet_file)
+                        
                     if hash_data:
                         print(f"哈希格式: {hash_data[:50]}...")
                         print(f"保存到: {hash_file}")
                     else:
                         print("提取哈希失败")
             else:
-                hash_data, hash_file = extract_hash_from_wallet(args.wallet_path)
+                # 根据参数选择提取方法
+                if args.bitcoin2john:
+                    hash_data, hash_file = extract_hash_from_wallet(args.wallet_path)
+                else:
+                    # 这里可以调用其他的hash提取方法
+                    hash_data, hash_file = extract_hash_from_wallet(args.wallet_path)
+                    
                 if hash_data:
                     print(f"哈希格式: {hash_data[:50]}...")
                     print(f"保存到: {hash_file}")

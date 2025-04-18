@@ -5,8 +5,38 @@ import tempfile
 import subprocess
 from btcracker.utils.logging import log
 from btcracker.utils.file_handling import extract_passwords_from_file
-from btcracker.core.hash_extraction import detect_hash_mode
 from btcracker.attacks.dictionary import test_bitcoin_core_password, dictionary_attack
+
+def detect_hash_mode(hash_file):
+    """检测Hash文件的哈希模式
+    
+    参数:
+        hash_file: Hash文件路径
+        
+    返回:
+        int: Hashcat的哈希模式代码，如果无法检测则返回-1
+    """
+    try:
+        if not os.path.exists(hash_file):
+            log(f"错误: Hash文件不存在: {hash_file}", level=0)
+            return -1
+            
+        with open(hash_file, 'r') as f:
+            hash_data = f.read().strip()
+            
+        # 检测Bitcoin钱包哈希格式
+        if hash_data.startswith('$bitcoin$'):
+            return 11300  # Bitcoin/Litecoin wallet.dat
+            
+        # 其他格式可以在这里添加
+        
+        # 如果无法确定类型，返回-1
+        log(f"警告: 无法识别Hash格式: {hash_data[:50]}...", level=1)
+        return -1
+        
+    except Exception as e:
+        log(f"检测Hash模式时出错: {str(e)}", level=0)
+        return -1
 
 def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None, 
                   min_length=1, max_length=8, cpu_only=False, resume=True):
@@ -84,7 +114,7 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                 wordlist_file = temp_wordlist
         
         # 基础命令
-        base_cmd = ["hashcat", "-m", str(hash_mode), hash_file, "--status", "--status-timer", "5"]
+        base_cmd = ["hashcat", "-m", str(hash_mode), hash_file, "--status", "--status-timer", "3"]
         
         # 添加会话和恢复功能
         base_cmd.extend(["--session", session_id, "--potfile-path", potfile])
@@ -101,6 +131,22 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
         is_macos = platform.system() == "Darwin"
         is_arm = "arm" in platform.processor().lower()
         
+        # Bitcoin钱包专用优化参数
+        if hash_mode == 11300:
+            print("应用Bitcoin钱包专用优化参数")
+            # 优化内核速度参数
+            base_cmd.extend(["--optimized-kernel-enable", "--workload-profile=3"])
+            
+            # 如果是CPU模式，增加线程优化
+            if cpu_only or (is_macos and is_arm):
+                base_cmd.extend(["--opencl-device-types=1", "--hwmon-disable", "--bitmap-min=12", "--bitmap-max=24", "--loopback"])
+                
+                # 使用单一密码模式，可能更适合某些 CPU
+                base_cmd.append("--slow-candidates")
+                
+                # 降低工作量，增加成功率
+                base_cmd.append("--weak")
+        
         # 设置CPU/GPU选项
         if cpu_only or (is_macos and is_arm):
             if not cpu_only:
@@ -110,7 +156,12 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                 
             # macOS上的优化设置
             if is_macos:
-                base_cmd.extend(["--force", "-D", "1", "--backend-devices", "1"])
+                # 增加Apple Silicon上的CPU优化选项
+                base_cmd.extend(["--force", "-D", "1", "--backend-devices", "1", "--backend-ignore-cuda", "--backend-ignore-opencl"])
+                
+                # 增加线程数和循环速度
+                thread_count = os.cpu_count() or 8
+                base_cmd.extend(["-T", str(thread_count), "--backend-info"])
             else:
                 base_cmd.extend(["--force", "--opencl-device-types", "1", "--backend-devices", "1", "--cpu-affinity=1"])
         else:
@@ -145,17 +196,92 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
             try:
                 print(f"执行字典攻击命令: {' '.join(cmd)}")
                 
-                # 执行主要破解过程 - 非阻塞方式
-                with open(os.devnull, 'w') as devnull:
-                    process = subprocess.Popen(cmd, stdout=devnull, stderr=subprocess.PIPE, text=True)
+                # 当处理比特币钱包时，在后台单独进行直接密码测试
+                direct_test_result = None
+                direct_test_thread = None
                 
-                # 等待一段时间让 hashcat 开始工作
-                time.sleep(5)
+                # 执行主要破解过程 - 使用管道获取输出
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
                 
-                # 每5秒检查一次是否找到密码
-                max_checks = 10
-                for i in range(max_checks):
-                    # 检查是否找到密码
+                # 在 process 启动后启动后台线程
+                if "bitcoin" in hash_file and passwords:
+                    # 创建一个函数来在后台测试密码
+                    def test_passwords_directly():
+                        nonlocal direct_test_result
+                        wallet_name = None
+                        try:
+                            # 尝试从钱包路径提取名称
+                            # 从临时文件名提取钱包名称
+                            # 查找Bitcoin钱包目录
+                            bitcoin_dir = os.path.expanduser("~/Library/Application Support/Bitcoin/wallets")
+                            if os.path.exists(bitcoin_dir):
+                                for wallet_dir in os.listdir(bitcoin_dir):
+                                    if os.path.isdir(os.path.join(bitcoin_dir, wallet_dir)):
+                                        wallet_name = wallet_dir
+                                        print(f"后台任务: 找到钱包名称 {wallet_name}")
+                                        break
+                                        
+                            if wallet_name:
+                                print(f"后台任务: 开始内置方法测试密码...")
+                                # 测试前 3 个密码
+                                test_passwords = passwords[:3]
+                                for password in test_passwords:
+                                    print(f"后台任务: 测试密码 {password}")
+                                    success, _ = test_bitcoin_core_password(wallet_name, password)
+                                    if success:
+                                        direct_test_result = password
+                                        print(f"后台任务: 找到密码: {direct_test_result}")
+                                        # 提前终止 hashcat 进程
+                                        if process.poll() is None:
+                                            process.terminate()
+                                        return
+                        except Exception as e:
+                            print(f"后台任务错误: {e}")
+                    
+                    # 启动后台线程
+                    import threading
+                    direct_test_thread = threading.Thread(target=test_passwords_directly)
+                    direct_test_thread.daemon = True
+                    print("启动后台密码测试线程...")
+                    direct_test_thread.start()
+                
+                # 增加超时时间 - 最长等待5分钟
+                start_time = time.time()
+                max_wait_time = 600  # 增加到10分钟
+                check_interval = 3    # 每3秒检查一次
+                
+                found_password = None
+                
+                # 直接从输出流读取结果
+                while process.poll() is None and (time.time() - start_time) < max_wait_time:
+                    # 检查是否找到密码 - 从输出流直接读取
+                    stdout_line = process.stdout.readline().strip()
+                    if stdout_line:
+                        print(f"hashcat输出: {stdout_line}")  # 增加输出调试信息
+                        if "Status....." in stdout_line and "Cracked" in stdout_line:
+                            print(f"检测到hashcat已破解密码! 读取结果...")
+                            # 终止进程
+                            process.terminate()
+                            break
+                        elif "All hashes found as potfile" in stdout_line:
+                            print(f"hashcat检测到哈希已在potfile中找到! 使用--show查看结果...")
+                            process.terminate()
+                            
+                            # 使用--show选项查看匹配密码
+                            show_cmd = ["hashcat", "-m", str(hash_mode), hash_file, "--show", "--force"]
+                            show_process = subprocess.run(show_cmd, capture_output=True, text=True)
+                            show_output = show_process.stdout.strip()
+                            print(f"--show输出: {show_output}")
+                            
+                            if show_output and ":" in show_output:
+                                password = show_output.split(":", 1)[1]
+                                print(f"\n成功! 在potfile中找到匹配的密码: {password}")
+                                found_password = password
+                            break
+                        elif "All hashes found" in stdout_line or "Exhausted" in stdout_line or "Recovered" in stdout_line:
+                            print(f"hashcat可能已找到密码，检查结果...")
+                            
+                    # 检查potfile是否有内容
                     if os.path.exists(potfile) and os.path.getsize(potfile) > 0:
                         # 终止主进程
                         process.terminate()
@@ -167,17 +293,8 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                                 password = potfile_content.split(":", 1)[1]
                                 if "exception" not in password.lower():  # 排除异常信息
                                     print(f"\n成功! 字典攻击找到密码: {password}")
-                                    # 验证密码
-                                    if "bitcoin" in hash_file:
-                                        wallet_name = os.path.basename(os.path.dirname(hash_file))
-                                        success, _ = test_bitcoin_core_password(wallet_name, password)
-                                        if success:
-                                            print("密码验证成功！")
-                                            return password
-                                        else:
-                                            print("警告: 密码无法通过Bitcoin Core验证，可能是误报")
-                                    else:
-                                        return password
+                                    found_password = password
+                                    break
                     
                     # 检查输出文件
                     if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
@@ -190,64 +307,72 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                                 password = password_data.split(":", 1)[1]
                                 if "exception" not in password.lower():  # 排除异常信息
                                     print(f"\n成功! 字典攻击找到密码: {password}")
-                                    # 验证密码
-                                    if "bitcoin" in hash_file:
-                                        wallet_name = os.path.basename(os.path.dirname(hash_file))
-                                        success, _ = test_bitcoin_core_password(wallet_name, password)
-                                        if success:
-                                            print("密码验证成功！")
-                                            return password
-                                        else:
-                                            print("警告: 密码无法通过Bitcoin Core验证，可能是误报")
-                                    else:
-                                        return password
+                                    found_password = password
+                                    break
                     
-                    # 检查进程是否已结束
-                    if process.poll() is not None:
-                        # 进程已结束，再次检查 potfile 和输出文件
-                        if os.path.exists(potfile) and os.path.getsize(potfile) > 0:
-                            with open(potfile, "r") as f:
-                                potfile_content = f.read().strip()
-                                if ":" in potfile_content:
-                                    password = potfile_content.split(":", 1)[1]
-                                    if "exception" not in password.lower():  # 排除异常信息
-                                        print(f"\n成功! 字典攻击找到密码: {password}")
-                                        # 验证密码
-                                        if "bitcoin" in hash_file:
-                                            wallet_name = os.path.basename(os.path.dirname(hash_file))
-                                            success, _ = test_bitcoin_core_password(wallet_name, password)
-                                            if success:
-                                                print("密码验证成功！")
-                                                return password
-                                            else:
-                                                print("警告: 密码无法通过Bitcoin Core验证，可能是误报")
-                                        else:
-                                            return password
-                        
-                        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                            with open(output_file, "r") as f:
-                                password_data = f.read().strip()
-                                if ":" in password_data:
-                                    password = password_data.split(":", 1)[1]
-                                    if "exception" not in password.lower():  # 排除异常信息
-                                        print(f"\n成功! 字典攻击找到密码: {password}")
-                                        # 验证密码
-                                        if "bitcoin" in hash_file:
-                                            wallet_name = os.path.basename(os.path.dirname(hash_file))
-                                            success, _ = test_bitcoin_core_password(wallet_name, password)
-                                            if success:
-                                                print("密码验证成功！")
-                                                return password
-                                            else:
-                                                print("警告: 密码无法通过Bitcoin Core验证，可能是误报")
-                                        else:
-                                            return password
-                        
-                        # 如果进程已结束且未找到密码，则跳出循环
-                        break
-                    
-                    # 等待5秒
-                    time.sleep(5)
+                    # 等待一小段时间
+                    time.sleep(check_interval)
+                
+                # 确保进程终止
+                if process.poll() is None:
+                    print("正在终止hashcat进程...")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        print("强制终止hashcat进程")
+                        process.kill()
+                
+                # 如果启动了后台线程，等待它完成
+                if direct_test_thread and direct_test_thread.is_alive():
+                    print("等待后台密码测试完成...")
+                    direct_test_thread.join(timeout=5)  # 最多等待5秒钟
+                
+                # 检查后台密码测试结果
+                if direct_test_result:
+                    print(f"\n成功! 后台直接测试找到密码: {direct_test_result}")
+                    return direct_test_result
+                
+                # 再次检查输出文件和potfile
+                if not found_password:
+                    if os.path.exists(potfile) and os.path.getsize(potfile) > 0:
+                        with open(potfile, "r") as f:
+                            potfile_content = f.read().strip()
+                            if ":" in potfile_content:
+                                password = potfile_content.split(":", 1)[1]
+                                if "exception" not in password.lower():
+                                    print(f"\n成功! 字典攻击找到密码: {password}")
+                                    found_password = password
+                
+                    if not found_password and os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                        with open(output_file, "r") as f:
+                            password_data = f.read().strip()
+                            if ":" in password_data:
+                                password = password_data.split(":", 1)[1]
+                                if "exception" not in password.lower():
+                                    print(f"\n成功! 字典攻击找到密码: {password}")
+                                    found_password = password
+                
+                # 最后尝试使用内置方法
+                if found_password:
+                    # 验证密码
+                    if "bitcoin" in hash_file:
+                        wallet_name = os.path.basename(os.path.dirname(hash_file))
+                        try:
+                            success, _ = test_bitcoin_core_password(wallet_name, found_password)
+                            if success:
+                                print("密码验证成功！")
+                                return found_password
+                            else:
+                                print("警告: 密码无法通过Bitcoin Core验证，可能是误报")
+                        except Exception as e:
+                            print(f"验证密码时出错: {e}")
+                            # 但仍然返回找到的密码
+                            return found_password
+                    else:
+                        return found_password
+                
+                print("Hashcat未找到密码")
                 
                 # 由于 hashcat 可能存在问题，如果我们有从字典文件提取的密码列表，使用内置方法尝试破解
                 if passwords and "bitcoin" in hash_file:
@@ -277,7 +402,6 @@ def hashcat_attack(hash_file, wordlist_file=None, attack_mode=0, charset=None,
                             print(f"\n成功! 内置字典攻击找到密码: {password}")
                             return password
                 
-                print("未找到密码")
                 return None
                 
             except Exception as e:

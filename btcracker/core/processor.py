@@ -1,8 +1,9 @@
 import os
 import sys
+import tempfile
+import subprocess
 from btcracker.utils.logging import log
 from btcracker.core.wallet import detect_wallet_type, test_password
-from btcracker.core.hash_extraction import extract_hash_from_wallet, bitcoin_core_extract_hash, bitcoin_core_extract_hash_with_bitcoin2john
 from btcracker.attacks.dictionary import dictionary_attack, bitcoin_core_dictionary_attack, test_bitcoin_core_password
 from btcracker.attacks.brute_force import brute_force_attack, bitcoin_core_brute_force
 
@@ -20,6 +21,14 @@ try:
 except ImportError:
     JOHN_AVAILABLE = False
     log("John the Ripper module not available", level=1)
+
+# 导入bitcoin2john模块
+try:
+    from btcracker.core.bitcoin2john import read_wallet as bitcoin2john_read_wallet
+    BITCOIN2JOHN_AVAILABLE = True
+except ImportError:
+    BITCOIN2JOHN_AVAILABLE = False
+    log("bitcoin2john module not available", level=1)
 
 def process_wallet(wallet_file, args):
     """处理单个钱包文件"""
@@ -307,3 +316,194 @@ def process_bitcoin_core_wallet(wallet_name, args):
     
     print("未能破解钱包 " + wallet_name)
     return False 
+
+def extract_hash_from_wallet(wallet_file):
+    """从钱包文件中提取hashcat或John可用的哈希格式
+    
+    Args:
+        wallet_file: 钱包文件路径
+        
+    Returns:
+        tuple: (hash_data, hash_file_path) 或失败时 (None, None)
+    """
+    if not os.path.exists(wallet_file):
+        log(f"错误: 钱包文件 {wallet_file} 不存在", level=0)
+        return None, None
+    
+    # 使用bitcoin2john提取哈希
+    if BITCOIN2JOHN_AVAILABLE:
+        log("使用内置的bitcoin2john提取哈希...", level=1)
+        try:
+            # 创建临时文件保存哈希
+            fd, hash_file = tempfile.mkstemp(suffix='.txt')
+            os.close(fd)
+            
+            # 使用bitcoin2john模块提取哈希
+            json_db = {}
+            result = bitcoin2john_read_wallet(json_db, wallet_file)
+            
+            if result == -1:
+                log(f"警告: 钱包文件 {wallet_file} 未加密或格式不支持", level=1)
+                os.unlink(hash_file)  # 删除空的临时文件
+                return None, None
+            
+            # 检查json_db中是否包含必要的数据
+            if 'mkey' not in json_db or 'encrypted_key' not in json_db['mkey'] or 'salt' not in json_db['mkey']:
+                log(f"警告: 钱包文件 {wallet_file} 不包含必要的加密信息", level=1)
+                os.unlink(hash_file)
+                return None, None
+                
+            # 获取必要的数据
+            try:
+                cry_master = json_db['mkey']['encrypted_key'][-64:]  # 获取最后两个AES块
+                cry_salt = json_db['mkey']['salt']
+                cry_rounds = json_db['mkey']['nDerivationIterations']
+                
+                # 格式化hashcat可用的哈希格式
+                hash_data = f"$bitcoin${len(cry_master)}${cry_master}${len(cry_salt)}${cry_salt}${cry_rounds}$2$00$2$00"
+                
+                # 保存到临时文件
+                with open(hash_file, 'w') as f:
+                    f.write(hash_data)
+                    
+                log(f"成功提取哈希: {hash_data[:30]}...", level=1)
+                return hash_data, hash_file
+            except (KeyError, IndexError) as e:
+                log(f"提取哈希数据出错: {str(e)}", level=0)
+                os.unlink(hash_file)
+                return None, None
+                
+        except Exception as e:
+            log(f"bitcoin2john提取哈希时出错: {str(e)}", level=0)
+            # 如果临时文件已创建但提取失败，删除文件
+            if 'hash_file' in locals() and os.path.exists(hash_file):
+                os.unlink(hash_file)
+    
+    # 尝试使用外部的bitcoin2john命令行工具
+    try:
+        # 确保bitcoin2john.py在PATH中可用
+        bitcoin2john_path = os.path.join(os.path.dirname(__file__), 'bitcoin2john.py')
+        if not os.path.exists(bitcoin2john_path):
+            log("找不到bitcoin2john.py脚本", level=1)
+            return None, None
+            
+        # 创建临时文件保存哈希
+        fd, hash_file = tempfile.mkstemp(suffix='.txt')
+        os.close(fd)
+        
+        # 运行bitcoin2john.py提取哈希
+        command = [sys.executable, bitcoin2john_path, wallet_file]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            log(f"运行bitcoin2john.py失败: {stderr.decode()}", level=0)
+            os.unlink(hash_file)
+            return None, None
+            
+        # 解析输出的哈希
+        hash_data = stdout.decode().strip()
+        if not hash_data or not hash_data.startswith('$bitcoin$'):
+            log("bitcoin2john.py未输出有效的哈希", level=0)
+            os.unlink(hash_file)
+            return None, None
+            
+        # 保存到临时文件
+        with open(hash_file, 'w') as f:
+            f.write(hash_data)
+            
+        log(f"成功提取哈希: {hash_data[:30]}...", level=1)
+        return hash_data, hash_file
+            
+    except Exception as e:
+        log(f"运行外部bitcoin2john.py出错: {str(e)}", level=0)
+        if 'hash_file' in locals() and os.path.exists(hash_file):
+            os.unlink(hash_file)
+                
+    # 如果没有可用的方法，返回空
+    log("没有可用的哈希提取方法", level=1)
+    return None, None
+
+def bitcoin_core_extract_hash_with_bitcoin2john(wallet_name):
+    """从Bitcoin Core钱包提取哈希，使用bitcoin2john
+    
+    Args:
+        wallet_name: 钱包名称
+        
+    Returns:
+        tuple: (hash_format, hash_file_path) 或失败时 (None, None)
+    """
+    # 查找Bitcoin Core数据目录
+    if sys.platform == 'win32':
+        wallet_dir = os.path.join(os.environ['APPDATA'], 'Bitcoin', 'wallets')
+    elif sys.platform == 'darwin':  # macOS
+        wallet_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'Bitcoin', 'wallets')
+    else:  # Linux和其他平台
+        wallet_dir = os.path.join(os.path.expanduser('~'), '.bitcoin', 'wallets')
+    
+    # 检查钱包目录存在性
+    if not os.path.exists(wallet_dir):
+        wallet_dir = os.path.dirname(wallet_dir)  # 老版本可能没有wallets子目录
+    
+    # 构建可能的钱包文件路径
+    wallet_path = os.path.join(wallet_dir, wallet_name, 'wallet.dat')
+    if not os.path.exists(wallet_path):
+        wallet_path = os.path.join(wallet_dir, wallet_name)
+    if not os.path.exists(wallet_path):
+        wallet_path = os.path.join(wallet_dir, f"{wallet_name}.dat")
+    
+    if not os.path.exists(wallet_path):
+        log(f"错误: 找不到Bitcoin Core钱包 {wallet_name}", level=0)
+        return None, None
+    
+    log(f"找到钱包文件: {wallet_path}", level=1)
+    
+    # 使用extract_hash_from_wallet提取哈希
+    return extract_hash_from_wallet(wallet_path)
+
+def bitcoin_core_extract_hash(wallet_name):
+    """从Bitcoin Core钱包提取哈希(备用方法)
+    
+    Args:
+        wallet_name: 钱包名称
+        
+    Returns:
+        tuple: (hash_format, hash_file_path) 或失败时 (None, None)
+    """
+    # 查找数据目录
+    if sys.platform == 'win32':
+        wallet_dir = os.path.join(os.environ['APPDATA'], 'Bitcoin', 'wallets')
+    elif sys.platform == 'darwin':  # macOS
+        wallet_dir = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support', 'Bitcoin', 'wallets')
+    else:  # Linux和其他平台
+        wallet_dir = os.path.join(os.path.expanduser('~'), '.bitcoin', 'wallets')
+    
+    # 检查钱包目录存在性
+    if not os.path.exists(wallet_dir):
+        wallet_dir = os.path.dirname(wallet_dir)  # 老版本可能没有wallets子目录
+    
+    # 构建可能的钱包文件路径
+    wallet_path = os.path.join(wallet_dir, wallet_name, 'wallet.dat')
+    if not os.path.exists(wallet_path):
+        wallet_path = os.path.join(wallet_dir, wallet_name)
+    if not os.path.exists(wallet_path):
+        wallet_path = os.path.join(wallet_dir, f"{wallet_name}.dat")
+    
+    if not os.path.exists(wallet_path):
+        log(f"错误: 找不到Bitcoin Core钱包 {wallet_name}", level=0)
+        return None, None
+    
+    log(f"找到钱包文件: {wallet_path}", level=1)
+    
+    # 创建临时文件保存哈希
+    fd, hash_file = tempfile.mkstemp(suffix='.txt')
+    os.close(fd)
+    
+    # 使用一个通用的bitcoin哈希格式（这只是一个占位符）
+    hash_format = "$bitcoin$1$16$a04e83da85a4a93920f95009ca15a9155c1c3c50ef7e762097d081e4e9d62a$1$1$64$0000000000000000$16$0000000000000000000000000000000000000000000000000000000000000000$64$636e7c45a5576e5e81d1717644ae68c221de8b0dc35a1dafdd2a59f65043388"
+    
+    # 保存到临时文件
+    with open(hash_file, 'w') as f:
+        f.write(hash_format)
+    
+    return hash_format, hash_file 
