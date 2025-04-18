@@ -4,9 +4,6 @@
 [submodule "john"]
 	path = john
 	url = https://github.com/openwall/john.git
-[submodule "btcrecover"]
-	path = btcrecover
-	url = https://github.com/gurnec/btcrecover.git
 [submodule "hashcat"]
 	path = hashcat
 	url = https://github.com/hashcat/hashcat.git

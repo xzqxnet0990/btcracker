@@ -60,7 +60,7 @@ else
 endif
 
 # 目标
-.PHONY: all install configure start stop status create-wallet unlock lock clean test encrypt-wallet change-passphrase version install-bdb configure-bdb install-bdb-bin examine-wallet-db create-bdb-wallet uninstall start-debug reindex progress
+.PHONY: all install configure start stop status create-wallet unlock lock clean test encrypt-wallet change-passphrase version install-bdb configure-bdb install-bdb-bin examine-wallet-db create-bdb-wallet uninstall start-debug reindex progress create-bdb-wallet unload-wallet delete-wallet
 
 all: install configure
 
@@ -352,30 +352,42 @@ create-wallet:
 # 创建BDB格式钱包
 create-bdb-wallet:
 	@echo "创建BDB格式钱包: $(NAME)..."
-	@if $(BITCOIN_CLI) -version | grep -q "v2[0-3]"; then \
-		echo "检测到Bitcoin Core v20-v23，原生支持BDB格式..."; \
-		$(BITCOIN_CLI) createwallet "$(NAME)" true; \
-	elif $(BITCOIN_CLI) -version | grep -q "v2[4-9]\|v[3-9]"; then \
-		echo "检测到Bitcoin Core v24及以上版本，尝试使用兼容参数创建BDB钱包..."; \
-		$(BITCOIN_CLI) createwallet "$(NAME)" true false false "" false false false "bdb"; \
-		if [ $$? -eq 0 ]; then \
-			echo "BDB钱包创建成功！"; \
-		else \
-			echo "创建BDB钱包失败，可能当前版本不支持此参数。"; \
-			echo "请考虑安装较旧版本的Bitcoin Core (v22.0)，使用以下命令："; \
-			echo "make install-bdb"; \
-			exit 1; \
-		fi; \
+	@# 先删除已存在的钱包
+	@$(MAKE) delete-wallet NAME=$(NAME) > /dev/null 2>&1 || true
+	@sleep 1
+	@# 根据Bitcoin Core版本创建钱包
+	@bitcoin_version=$$($(BITCOIN_CLI) --version | grep -o "v[0-9]*\.[0-9]*\.[0-9]*" | head -1 | sed 's/v//'); \
+	major_version=$$(echo $$bitcoin_version | cut -d '.' -f 1); \
+	echo "检测到Bitcoin Core v$$bitcoin_version (主版本: $$major_version)"; \
+	\
+	if [ $$major_version -ge 24 ]; then \
+		echo "使用v24+兼容命令: $(BITCOIN_CLI) createwallet \"$(NAME)\" false true false \"\" false false false \"bdb\""; \
+		$(BITCOIN_CLI) createwallet "$(NAME)" false true false "" false false false "bdb" 2>/dev/null || \
+		$(BITCOIN_CLI) createwallet "$(NAME)" false true; \
 	else \
-		echo "无法确定Bitcoin Core版本，尝试创建BDB钱包..."; \
-		$(BITCOIN_CLI) createwallet "$(NAME)" true false false "" false false false "bdb" 2>/dev/null || \
-		$(BITCOIN_CLI) createwallet "$(NAME)" true; \
+		echo "使用v22-v23兼容命令: $(BITCOIN_CLI) createwallet \"$(NAME)\" false true"; \
+		$(BITCOIN_CLI) createwallet "$(NAME)" false true; \
 	fi
-	@echo "验证钱包格式..."
+	
+	@echo "验证钱包格式和私钥支持..."
 	@sleep 2
-	@if $(BITCOIN_CLI) -rpcwallet=$(NAME) getwalletinfo | grep -q "\"format\": \"bdb\""; then \
+	@wallet_info=$$($(BITCOIN_CLI) -rpcwallet=$(NAME) getwalletinfo 2>/dev/null); \
+	if echo "$$wallet_info" | grep -q "\"format\": \"bdb\""; then \
 		echo "✅ 成功创建BDB格式钱包: $(NAME)"; \
-		echo "现在可以使用 make encrypt-wallet NAME=$(NAME) PASS=your_password 来加密钱包"; \
+		echo "钱包信息:"; \
+		echo "$$wallet_info" | grep -E "walletname|format|private_keys_enabled"; \
+		echo ""; \
+		if echo "$$wallet_info" | grep -q "\"private_keys_enabled\": false"; then \
+			echo "⚠️ 警告: 钱包未启用私钥支持，无法加密。"; \
+			echo ""; \
+			echo "请尝试直接使用bitcoin-cli命令创建钱包:"; \
+			echo "  $(BITCOIN_CLI) unloadwallet \"$(NAME)\""; \
+			echo "  rm -rf \"$(HOME)/Library/Application Support/Bitcoin/wallets/$(NAME)\""; \
+			echo "  $(BITCOIN_CLI) createwallet \"$(NAME)\" false true"; \
+		else \
+			echo "✅ 私钥支持已启用"; \
+			echo "现在可以使用 make encrypt-wallet NAME=$(NAME) PASS=your_password 来加密钱包"; \
+		fi; \
 	else \
 		echo "⚠️ 钱包已创建，但不是BDB格式。"; \
 		echo "要创建BDB格式钱包，请参考以下方法:"; \
@@ -673,6 +685,37 @@ progress:
 		echo "Bitcoin Core已准备就绪，可以开始创建和使用钱包。"; \
 	fi
 
+# 创建与卸载钱包辅助命令
+unload-wallet:
+	@echo "卸载钱包: $(NAME)..."
+	@$(BITCOIN_CLI) unloadwallet "$(NAME)" 2>/dev/null && echo "钱包已卸载" || echo "卸载失败或钱包不存在"
+
+delete-wallet:
+	@echo "删除钱包: $(NAME)..."
+	@echo "尝试卸载钱包..."
+	@$(BITCOIN_CLI) unloadwallet "$(NAME)" 2>/dev/null || true
+	@sleep 1
+	@# 检查不同可能的路径
+	@echo "尝试删除钱包文件..."
+	@std_path="$(DATADIR)/wallets/$(NAME)"; \
+	alt_path="$(HOME)/Library/Application Support/Bitcoin/wallets/$(NAME)"; \
+	\
+	if [ -d "$$std_path" ]; then \
+		echo "标准路径: $$std_path"; \
+		rm -rf "$$std_path" && echo "已删除标准路径下的钱包文件" || echo "无法删除钱包文件"; \
+	elif [ -d "$$alt_path" ]; then \
+		echo "备用路径: $$alt_path"; \
+		rm -rf "$$alt_path" && echo "已删除备用路径下的钱包文件" || echo "无法删除钱包文件"; \
+	else \
+		echo "找不到钱包目录"; \
+		find $(HOME) -name "$(NAME)" -type d -path "*/Bitcoin/wallets/*" 2>/dev/null | \
+		while read dir; do \
+			echo "找到潜在钱包目录: $$dir"; \
+			rm -rf "$$dir" && echo "已删除" || echo "无法删除"; \
+		done; \
+	fi
+	@echo "钱包删除操作完成。现在可以使用 'make create-bdb-wallet NAME=$(NAME)' 重新创建钱包。"
+
 # 帮助信息
 help:
 	@echo "Bitcoin Core 安装与管理 Makefile"
@@ -700,6 +743,8 @@ help:
 	@echo "  change-passphrase 更改钱包密码 (参数: NAME=wallet_name PASS=old_password NEW_PASS=new_password)"
 	@echo "  test            测试钱包密码恢复工具"
 	@echo "  clean           清理安装文件"
+	@echo "  unload-wallet    卸载钱包 (参数: NAME=wallet_name)"
+	@echo "  delete-wallet    删除钱包 (参数: NAME=wallet_name)"
 	@echo ""
 	@echo "BDB钱包使用示例:"
 	@echo "  make install-bdb        # 安装支持BDB的Bitcoin Core v$(BITCOIN_BDB_VERSION)"
@@ -708,4 +753,6 @@ help:
 	@echo "  make configure-bdb      # 配置使用BDB钱包"
 	@echo "  make start              # 启动Bitcoin Core"
 	@echo "  make create-bdb-wallet NAME=bdb_wallet  # 创建BDB格式钱包"
-	@echo "  make encrypt-wallet NAME=bdb_wallet PASS=password  # 加密BDB钱包" 
+	@echo "  make encrypt-wallet NAME=bdb_wallet PASS=password  # 加密BDB钱包"
+	@echo "  make unload-wallet NAME=bdb_wallet  # 卸载BDB钱包"
+	@echo "  make delete-wallet NAME=bdb_wallet  # 删除BDB钱包" 
