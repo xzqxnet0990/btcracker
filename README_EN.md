@@ -14,6 +14,7 @@ This project provides a Makefile for installing and managing Bitcoin Core, as we
 - Automated installation and configuration of Bitcoin Core
 - Wallet creation, unlocking, and locking functionality
 - Wallet information and database file viewing functionality
+- Support for importing wallet files (individual or batch import)
 - Support for multiple password recovery methods:
   - Dictionary attack
   - Brute force attack
@@ -53,6 +54,28 @@ make examine-wallet-db NAME=mywallet
 # Stop Bitcoin Core daemon
 make stop
 ```
+
+### Importing Existing Wallets
+
+You can import existing Bitcoin wallet files into Bitcoin Core and then use the btcracker tool to attempt password recovery:
+
+```bash
+# Import a single wallet file
+make import-wallet SRC=wallet/wallet1.001.dat NAME=wallet1_001
+
+# Batch import all wallet files in the wallet directory
+make import-all-wallets
+```
+
+**Wallet Import Notes:**
+- The `import-wallet` command requires specifying the source file path (`SRC`) and target wallet name (`NAME`)
+- The `import-all-wallets` command automatically imports all .dat files from the wallet directory, naming them as "imported_filename"
+- After importing, you can use `make status` to view the list of imported wallets
+- If Bitcoin Core is not running, first start it with `make start` before importing wallets
+- Imported wallets can be directly cracked using the btcracker tool:
+  ```bash
+  python btcracker_run.py --bitcoin-core imported_wallet1.001 --hashcat -d wordlist.txt
+  ```
 
 ### Creating and Encrypting Wallets
 
@@ -206,6 +229,9 @@ make examine-wallet-db NAME=mywallet
 
 # Specify wallet database path (if you know the exact path)
 make examine-wallet-db NAME=mywallet DB_PATH=/path/to/wallet.dat
+
+# Examine imported wallet information
+make examine-wallet-db NAME=imported_wallet1.001
 ```
 
 This command will display:

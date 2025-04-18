@@ -8,6 +8,8 @@
 #   make unlock NAME=wallet_name PASS=password - 解锁钱包
 #   make lock NAME=wallet_name - 锁定钱包
 #   make clean - 清理安装文件
+#   make import-wallet SRC=wallet/wallet1.001.dat NAME=wallet1_001 - 导入单个钱包文件
+#   make import-all-wallets - 导入wallet目录下的所有钱包文件
 
 # 配置变量
 BITCOIND = bitcoind
@@ -60,7 +62,7 @@ else
 endif
 
 # 目标
-.PHONY: all install configure start stop status create-wallet unlock lock clean test encrypt-wallet change-passphrase version install-bdb configure-bdb install-bdb-bin examine-wallet-db create-bdb-wallet uninstall start-debug reindex progress create-bdb-wallet unload-wallet delete-wallet
+.PHONY: all install configure start stop status create-wallet unlock lock clean test encrypt-wallet change-passphrase version install-bdb configure-bdb install-bdb-bin examine-wallet-db create-bdb-wallet uninstall start-debug reindex progress create-bdb-wallet unload-wallet delete-wallet import-wallet import-all-wallets
 
 all: install configure
 
@@ -718,6 +720,66 @@ delete-wallet:
 	fi
 	@echo "钱包删除操作完成。现在可以使用 'make create-bdb-wallet NAME=$(NAME)' 重新创建钱包。"
 
+# 导入一个钱包文件到Bitcoin Core
+import-wallet:
+	@if [ -z "$(SRC)" ]; then \
+		echo "错误: 请指定钱包文件路径，例如：make import-wallet SRC=wallet/wallet1.001.dat NAME=wallet1_001"; \
+		exit 1; \
+	fi
+	@if [ -z "$(NAME)" ]; then \
+		basename=$$(basename "$(SRC)" .dat); \
+		echo "未指定NAME，使用文件名: $$basename"; \
+		NAME=$$basename; \
+	fi
+	@echo "======================================================================================"
+	@echo "🔄 正在导入钱包文件 $(SRC) 到 $(NAME)..."
+	@if [ ! -f "$(SRC)" ]; then \
+		echo "❌ 错误: 钱包文件 $(SRC) 不存在"; \
+		exit 1; \
+	fi
+	@mkdir -p "$(DATADIR)/wallets/$(NAME)"
+	@echo "📂 复制钱包文件到 $(DATADIR)/wallets/$(NAME)/wallet.dat"
+	@cp -v "$(SRC)" "$(DATADIR)/wallets/$(NAME)/wallet.dat"
+	@chmod 600 "$(DATADIR)/wallets/$(NAME)/wallet.dat"
+	@echo "🔄 尝试加载钱包..."
+	@$(BITCOIN_CLI) loadwallet "$(NAME)" || echo "⚠️ 注意: loadwallet命令可能失败，但钱包文件已复制。如果Bitcoin Core未运行，请先启动后再加载钱包。"
+	@echo "✅ 钱包导入操作完成"
+	@echo "======================================================================================"
+	@echo "使用说明:"
+	@echo "1. 如果Bitcoin Core未运行，请使用 make start 启动"
+	@echo "2. 导入后可以尝试解锁钱包: make unlock NAME=$(NAME) PASS=你的密码"
+	@echo "3. 要测试破解此钱包，请使用: python btcracker_run.py --bitcoin-core $(NAME) --hashcat -d wordlist.txt"
+	@echo "======================================================================================"
+
+# 导入wallet目录下的所有钱包文件
+import-all-wallets:
+	@echo "======================================================================================"
+	@echo "🔄 正在导入wallet目录下的所有钱包文件..."
+	@if [ ! -d "wallet" ]; then \
+		echo "❌ 错误: wallet目录不存在"; \
+		exit 1; \
+	fi
+	@wallet_count=0; \
+	for wallet in wallet/*.dat; do \
+		if [ -f "$$wallet" ]; then \
+			basename=$$(basename "$$wallet" .dat); \
+			name="imported_$$basename"; \
+			echo "导入钱包: $$wallet -> $$name"; \
+			mkdir -p "$(DATADIR)/wallets/$$name"; \
+			cp -v "$$wallet" "$(DATADIR)/wallets/$$name/wallet.dat"; \
+			chmod 600 "$(DATADIR)/wallets/$$name/wallet.dat"; \
+			$(BITCOIN_CLI) loadwallet "$$name" 2>/dev/null || echo "⚠️ 注意: 加载钱包 $$name 失败，但文件已复制"; \
+			wallet_count=$$((wallet_count+1)); \
+		fi; \
+	done; \
+	echo "✅ 已导入 $$wallet_count 个钱包文件"
+	@echo "======================================================================================"
+	@echo "使用说明:"
+	@echo "1. 如果Bitcoin Core未运行，请使用 make start 启动，然后重新运行此命令加载钱包"
+	@echo "2. 要测试破解钱包，请使用: python btcracker_run.py --bitcoin-core imported_钱包名 --hashcat -d wordlist.txt"
+	@echo "3. 查看所有导入的钱包: $(BITCOIN_CLI) listwallets"
+	@echo "======================================================================================"
+
 # 帮助信息
 help:
 	@echo "Bitcoin Core 安装与管理 Makefile"
@@ -747,6 +809,8 @@ help:
 	@echo "  clean           清理安装文件"
 	@echo "  unload-wallet    卸载钱包 (参数: NAME=wallet_name)"
 	@echo "  delete-wallet    删除钱包 (参数: NAME=wallet_name)"
+	@echo "  import-wallet   导入单个钱包文件"
+	@echo "  import-all-wallets 导入wallet目录下的所有钱包文件"
 	@echo ""
 	@echo "BDB钱包使用示例:"
 	@echo "  make install-bdb        # 安装支持BDB的Bitcoin Core v$(BITCOIN_BDB_VERSION)"
@@ -757,4 +821,6 @@ help:
 	@echo "  make create-bdb-wallet NAME=bdb_wallet  # 创建BDB格式钱包"
 	@echo "  make encrypt-wallet NAME=bdb_wallet PASS=password  # 加密BDB钱包"
 	@echo "  make unload-wallet NAME=bdb_wallet  # 卸载BDB钱包"
-	@echo "  make delete-wallet NAME=bdb_wallet  # 删除BDB钱包" 
+	@echo "  make delete-wallet NAME=bdb_wallet  # 删除BDB钱包"
+	@echo "  make import-wallet SRC=wallet/wallet1.001.dat NAME=wallet1_001  # 导入单个钱包文件"
+	@echo "  make import-all-wallets  # 导入wallet目录下的所有钱包文件" 

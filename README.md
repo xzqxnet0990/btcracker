@@ -14,6 +14,7 @@
 - 自动化安装和配置 Bitcoin Core
 - 钱包创建、解锁和锁定功能
 - 钱包信息和数据库文件查看功能
+- 支持导入钱包文件功能（单个或批量导入）
 - 支持多种密码恢复方法：
   - 字典攻击
   - 暴力破解
@@ -53,6 +54,28 @@ make examine-wallet-db NAME=mywallet
 # 停止 Bitcoin Core 守护进程
 make stop
 ```
+
+### 导入已有钱包
+
+您可以导入现有的Bitcoin钱包文件到Bitcoin Core中，然后使用btcracker工具尝试恢复密码：
+
+```bash
+# 导入单个钱包文件
+make import-wallet SRC=wallet/wallet1.001.dat NAME=wallet1_001
+
+# 批量导入wallet目录下的所有钱包文件
+make import-all-wallets
+```
+
+**导入钱包说明：**
+- `import-wallet` 命令需要指定源文件路径(`SRC`)和目标钱包名称(`NAME`)
+- `import-all-wallets` 命令会自动将wallet目录下所有.dat文件导入，并以"imported_文件名"方式命名
+- 导入完成后，可以使用`make status`查看已导入的钱包列表
+- 如果Bitcoin Core未运行，请先使用`make start`启动，然后再导入钱包
+- 导入的钱包可以直接使用btcracker工具进行破解：
+  ```bash
+  python btcracker_run.py --bitcoin-core imported_wallet1.001 --hashcat -d wordlist.txt
+  ```
 
 ### 创建和加密钱包
 
@@ -206,6 +229,9 @@ make examine-wallet-db NAME=mywallet
 
 # 指定钱包数据库路径(如果知道确切路径)
 make examine-wallet-db NAME=mywallet DB_PATH=/path/to/wallet.dat
+
+# 查看导入的钱包信息
+make examine-wallet-db NAME=imported_wallet1.001
 ```
 
 此命令会显示：
