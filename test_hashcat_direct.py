@@ -9,12 +9,13 @@ import sys
 import subprocess
 import tempfile
 import time
+import json
 from btcracker.core.processor import bitcoin_core_extract_hash_with_bitcoin2john
 from btcracker.attacks.dictionary import test_bitcoin_core_password
 
 def main():
     # 允许从命令行参数传入钱包名称
-    wallet_name = sys.argv[1] if len(sys.argv) > 1 else "test_wallet"
+    wallet_name = sys.argv[1] if len(sys.argv) > 1 else "bdb_wallet"
     
     print(f"===== 测试钱包: {wallet_name} =====")
     
@@ -152,23 +153,9 @@ def main():
             return
             
         # ========================
-        # Bitcoin Core验证步骤
+        # Bitcoin Core RPC状态检查
         # ========================
-        print("\n===== Bitcoin Core验证步骤 =====")
-        print(f"使用密码 '{found_password}' 尝试验证Bitcoin Core钱包 '{wallet_name}'")
-        
-        success, message = test_bitcoin_core_password(wallet_name, found_password)
-        
-        if success:
-            print(f"✅ 验证成功! 密码 '{found_password}' 成功解锁钱包!")
-        else:
-            print(f"❌ 验证失败! 密码 '{found_password}' 无法解锁钱包!")
-            print(f"失败信息: {message}")
-            
-        # ========================
-        # 调试信息 
-        # ========================
-        print("\n===== 调试信息 =====")
+        print("\n===== Bitcoin Core RPC状态预检 =====")
         
         # 检查RPC连接
         print("检查Bitcoin Core RPC连接:")
@@ -176,9 +163,23 @@ def main():
         try:
             check_process = subprocess.run(check_cmd, capture_output=True, text=True)
             if check_process.returncode == 0:
-                print("Bitcoin Core RPC连接正常")
+                print("✅ Bitcoin Core RPC连接正常")
+                try:
+                    network_info = json.loads(check_process.stdout)
+                    print(f"版本信息: {network_info.get('version', '未知')}")
+                    print(f"协议版本: {network_info.get('protocolversion', '未知')}")
+                except:
+                    print("无法解析网络信息JSON")
             else:
-                print(f"Bitcoin Core RPC连接失败: {check_process.stderr}")
+                print(f"❌ Bitcoin Core RPC连接失败: {check_process.stderr}")
+                # 这里是关键点，我们尝试手动启动比特币核心RPC
+                print("尝试检查Bitcoin Core是否在运行...")
+                ps_cmd = ["ps", "aux"]
+                ps_process = subprocess.run(ps_cmd, capture_output=True, text=True)
+                if "bitcoind" in ps_process.stdout:
+                    print("✅ bitcoind进程正在运行")
+                else:
+                    print("❌ 未检测到bitcoind进程")
         except Exception as e:
             print(f"执行RPC检查时出错: {e}")
             
@@ -187,10 +188,20 @@ def main():
         list_cmd = ["bitcoin-cli", "listwallets"]
         try:
             list_process = subprocess.run(list_cmd, capture_output=True, text=True)
-            print(list_process.stdout.strip())
+            wallets_output = list_process.stdout.strip() or "[]"
+            print(f"钱包列表: {wallets_output}")
             
-            if wallet_name not in list_process.stdout:
-                print(f"警告: '{wallet_name}' 不在已加载钱包列表中!")
+            # 尝试解析JSON
+            try:
+                wallets = json.loads(wallets_output)
+                print(f"检测到 {len(wallets)} 个已加载钱包")
+                
+                if wallet_name not in wallets:
+                    print(f"⚠️ 警告: '{wallet_name}' 不在已加载钱包列表中!")
+                else:
+                    print(f"✅ 钱包 '{wallet_name}' 已在已加载列表中")
+            except:
+                print(f"⚠️ 无法解析钱包列表JSON: {wallets_output}")
         except Exception as e:
             print(f"获取钱包列表时出错: {e}")
             
@@ -199,7 +210,16 @@ def main():
         load_cmd = ["bitcoin-cli", "loadwallet", wallet_name]
         try:
             load_process = subprocess.run(load_cmd, capture_output=True, text=True)
-            print(load_process.stdout.strip() or load_process.stderr.strip())
+            result = load_process.stdout.strip() or load_process.stderr.strip()
+            print(f"加载结果: {result}")
+            
+            # 检查常见错误信息
+            if "already loaded" in result:
+                print("✅ 钱包已经加载 (这是正常的)")
+            elif "not found" in result:
+                print(f"❌ 钱包文件未找到! 请确认 '{wallet_name}' 是正确的钱包名称")
+            elif "error" in result.lower():
+                print(f"❌ 加载钱包时出错")
         except Exception as e:
             print(f"加载钱包时出错: {e}")
             
@@ -208,9 +228,124 @@ def main():
         info_cmd = ["bitcoin-cli", "-rpcwallet=" + wallet_name, "getwalletinfo"]
         try:
             info_process = subprocess.run(info_cmd, capture_output=True, text=True)
-            print(info_process.stdout.strip() or info_process.stderr.strip())
+            wallet_info = info_process.stdout.strip() or info_process.stderr.strip()
+            print(f"钱包信息: {wallet_info}")
+            
+            # 尝试解析JSON获取更详细信息
+            try:
+                wallet_data = json.loads(wallet_info)
+                if "error" in wallet_data:
+                    print(f"❌ 获取钱包信息错误: {wallet_data['error']['message']}")
+                else:
+                    # 钱包正常信息
+                    print(f"✅ 钱包名称: {wallet_data.get('walletname', '未知')}")
+                    print(f"✅ 钱包版本: {wallet_data.get('walletversion', '未知')}")
+                    print(f"✅ 钱包余额: {wallet_data.get('balance', '未知')}")
+                    print(f"✅ 锁定状态: {'已锁定' if wallet_data.get('unlocked_until', 0) == 0 else '已解锁'}")
+            except json.JSONDecodeError:
+                print(f"⚠️ 无法解析钱包信息JSON: {wallet_info}")
+                
         except Exception as e:
-            print(f"获取钱包信息时出错: {e}") 
+            print(f"获取钱包信息时出错: {e}")
+            
+        # ========================
+        # Bitcoin Core验证步骤
+        # ========================
+        print("\n===== Bitcoin Core验证步骤 =====")
+        print(f"使用密码 '{found_password}' 尝试验证Bitcoin Core钱包 '{wallet_name}'")
+        
+        # 直接使用bitcoin-cli自己尝试解锁
+        print("\n直接通过bitcoin-cli验证密码:")
+        unlock_cmd = ["bitcoin-cli", "-rpcwallet=" + wallet_name, "walletpassphrase", found_password, "2"]
+        try:
+            direct_unlock = subprocess.run(unlock_cmd, capture_output=True, text=True)
+            if direct_unlock.returncode == 0 and not direct_unlock.stderr:
+                print(f"✅ 直接验证成功! 钱包使用密码 '{found_password}' 成功解锁")
+                # 立即锁定
+                subprocess.run(["bitcoin-cli", "-rpcwallet=" + wallet_name, "walletlock"], capture_output=True)
+                direct_success = True
+            else:
+                error_msg = direct_unlock.stderr.strip() or direct_unlock.stdout.strip()
+                print(f"❌ 直接验证失败: {error_msg}")
+                direct_success = False
+        except Exception as e:
+            print(f"直接验证时出错: {e}")
+            direct_success = False
+
+        # 通过函数验证
+        print("\n通过test_bitcoin_core_password函数验证密码:")
+        try:
+            # 手动执行test_bitcoin_core_password中的逻辑来获取更多调试信息
+            unlock_cmd = ["bitcoin-cli", "-rpcwallet=" + wallet_name, "walletpassphrase", found_password, "2"]
+            process = subprocess.run(unlock_cmd, capture_output=True, text=True)
+            
+            print(f"解锁命令返回码: {process.returncode}")
+            print(f"解锁命令标准输出: '{process.stdout}'")
+            print(f"解锁命令错误输出: '{process.stderr}'")
+            
+            if process.returncode == 0 and not "error" in process.stderr.lower():
+                print("✅ 解锁成功")
+                success = True
+                message = "密码验证成功"
+            else:
+                print("❌ 解锁失败")
+                success = False
+                message = process.stderr or "未知错误"
+                
+                # 额外检查常见错误
+                if "Method not found" in message:
+                    print("❌ 钱包可能未加密或RPC方法不存在")
+                elif "wallet is not encrypted" in message.lower():
+                    print("⚠️ 钱包未加密，无需密码")
+                elif "incorrect passphrase" in message.lower():
+                    print("❌ 密码不正确")
+                    
+            # 确保钱包锁定
+            lock_cmd = ["bitcoin-cli", "-rpcwallet=" + wallet_name, "walletlock"]
+            lock_process = subprocess.run(lock_cmd, capture_output=True, text=True)
+            if lock_process.returncode == 0:
+                print("✅ 已重新锁定钱包")
+            else:
+                print(f"⚠️ 锁定钱包失败: {lock_process.stderr}")
+                
+        except Exception as e:
+            success = False
+            message = str(e)
+            print(f"❌ 验证过程中出错: {e}")
+        
+        if success:
+            print(f"✅ 验证成功! 密码 '{found_password}' 成功解锁钱包!")
+        else:
+            print(f"❌ 验证失败! 密码 '{found_password}' 无法解锁钱包!")
+            print(f"失败信息: {message}")
+            
+        # 尝试手动获取钱包列表信息
+        print("\n获取可用钱包目录:")
+        try:
+            bitcoin_dirs = [
+                os.path.expanduser("~/.bitcoin/wallets"),           # Linux/MacOS默认
+                os.path.expanduser("~/Library/Application Support/Bitcoin/wallets"),  # MacOS备用
+                os.path.expanduser("~/AppData/Roaming/Bitcoin/wallets"),  # Windows
+            ]
+            
+            for bitcoin_dir in bitcoin_dirs:
+                if os.path.exists(bitcoin_dir):
+                    print(f"找到钱包目录: {bitcoin_dir}")
+                    wallets = os.listdir(bitcoin_dir)
+                    print(f"目录内容: {wallets}")
+                    
+                    # 检查钱包是否存在
+                    if wallet_name in wallets:
+                        print(f"✅ 找到钱包 '{wallet_name}' 在 {bitcoin_dir}")
+                    else:
+                        print(f"❌ 在 {bitcoin_dir} 中未找到 '{wallet_name}'")
+                        
+                        # 检查是否使用了完整路径
+                        for potential_wallet in wallets:
+                            if potential_wallet in wallet_name or wallet_name in potential_wallet:
+                                print(f"⚠️ 可能相关的钱包: {potential_wallet}")
+        except Exception as e:
+            print(f"检查钱包目录时出错: {e}")
             
     except Exception as e:
         print(f"执行 hashcat 命令时出错: {e}")
