@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 直接使用 hashcat 测试 Bitcoin 钱包哈希
-用法: python test_hashcat_direct.py <钱包名称>
+用法: python test_hashcat_direct.py [钱包名称或路径]
 """
 
 import os
@@ -14,16 +14,26 @@ from btcracker.core.processor import bitcoin_core_extract_hash_with_bitcoin2john
 from btcracker.attacks.dictionary import test_bitcoin_core_password
 
 def main():
-    # 允许从命令行参数传入钱包名称
-    wallet_name = sys.argv[1] if len(sys.argv) > 1 else "bdb_wallet"
+    # 允许从命令行参数传入钱包名称或路径
+    wallet_arg = sys.argv[1] if len(sys.argv) > 1 else "bdb_wallet"
     
-    print(f"===== 测试钱包: {wallet_name} =====")
-    
-    # 提取哈希
-    hash_format, hash_file = bitcoin_core_extract_hash_with_bitcoin2john(wallet_name)
+    # 判断是钱包名称还是完整路径
+    if os.path.exists(wallet_arg) and os.path.isfile(wallet_arg):
+        wallet_path = wallet_arg
+        wallet_name = os.path.basename(os.path.dirname(wallet_path))
+        print(f"===== 测试钱包路径: {wallet_path} =====")
+        print(f"推测钱包名称: {wallet_name}")
+        
+        # 直接使用路径从wallet.dat提取哈希
+        hash_format, hash_file = bitcoin_core_extract_hash_with_bitcoin2john(wallet_path)
+    else:
+        # 使用钱包名称
+        wallet_name = wallet_arg
+        print(f"===== 测试钱包名称: {wallet_name} =====")
+        hash_format, hash_file = bitcoin_core_extract_hash_with_bitcoin2john(wallet_name)
     
     if not hash_format:
-        print(f"错误: 无法从 {wallet_name} 提取哈希")
+        print(f"错误: 无法从 {wallet_arg} 提取哈希")
         return
     
     print(f"成功提取哈希: {hash_format}")
